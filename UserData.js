@@ -3,7 +3,7 @@ import BigNumber from "bignumber.js";
 
 const web3 = new Web3(
   new Web3.providers.HttpProvider(
-    process.env.POLYGON_KEY
+    "https://polygon-mumbai.g.alchemy.com/v2/6OXarysKYq0scJx1uP8RPXxW43Q_eMRj"
   )
 );
 
@@ -77,6 +77,28 @@ const PD_ABI = [
     stateMutability: "view",
     type: "function",
   },
+  {
+    inputs: [{ internalType: "address", name: "asset", type: "address" }],
+    name: "getReserveConfigurationData",
+    outputs: [
+      { internalType: "uint256", name: "decimals", type: "uint256" },
+      { internalType: "uint256", name: "ltv", type: "uint256" },
+      {
+        internalType: "uint256",
+        name: "liquidationThreshold",
+        type: "uint256",
+      },
+      { internalType: "uint256", name: "liquidationBonus", type: "uint256" },
+      { internalType: "uint256", name: "reserveFactor", type: "uint256" },
+      { internalType: "bool", name: "usageAsCollateralEnabled", type: "bool" },
+      { internalType: "bool", name: "borrowingEnabled", type: "bool" },
+      { internalType: "bool", name: "stableBorrowRateEnabled", type: "bool" },
+      { internalType: "bool", name: "isActive", type: "bool" },
+      { internalType: "bool", name: "isFrozen", type: "bool" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
 ];
 const USD = 3083.7;
 const CONTRACT_ADDR = "0x9198F13B08E299d85E096929fA9781A1E3d5d827";
@@ -91,6 +113,7 @@ await getUserDetails();
 
 async function getUserDetails() {
   let map = new Map();
+  let decimal = new Map();
   await contract.methods
     .getUserAccountData(user.toLowerCase())
     .call()
@@ -124,7 +147,7 @@ async function getUserDetails() {
       }
       // console.log(map);
     });
-  
+
   console.log();
   console.log(`Asset Wise SUPPLIES And BORROWS:`);
   console.log();
@@ -136,6 +159,12 @@ async function getUserDetails() {
       arr.push(list);
     });
 
+    for(let i=0 ; i<arr[0].length ; i++)
+      await pdContract.methods.getReserveConfigurationData(arr[0][i].toLowerCase()).call()
+      .then((data) => {
+        decimal.set(arr[0][i].toLowerCase(), data.decimals);
+      });
+
     // console.log(arr);
   let results = [];
   for (let i = 0; i < arr[0].length; i++) {
@@ -145,14 +174,15 @@ async function getUserDetails() {
       .call()
       .then((data) => {
         results.push({
-          address: arr[0][i].toLowerCase(),
-          totalSupply: BigNumber(BigNumber(data.currentATokenBalance).div(1e18)).toPrecision(18),
+          address: addr,
+          totalSupply: BigNumber(BigNumber(data.currentATokenBalance).div(10**decimal.get(addr))).toPrecision(18),
           totalBorrows: BigNumber(
             BigNumber(data.currentStableDebt).plus(
               BigNumber(data.currentVariableDebt)
             )
           )
-            .div(1e18).toPrecision(18),
+            .div(10**decimal.get(addr)).toPrecision(18),
+          // totalBorrows: BigNumber(data.principalStableDebt).div(1e18).toPrecision(18),
         });
       });
   }
