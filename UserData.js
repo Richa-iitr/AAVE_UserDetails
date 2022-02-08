@@ -3,7 +3,7 @@ import BigNumber from "bignumber.js";
 
 const web3 = new Web3(
   new Web3.providers.HttpProvider(
-    process.env.POLYGON_KEY
+    "https://polygon-mumbai.g.alchemy.com/v2/6OXarysKYq0scJx1uP8RPXxW43Q_eMRj"
   )
 );
 
@@ -99,6 +99,28 @@ const PD_ABI = [
     stateMutability: "view",
     type: "function",
   },
+  {
+    inputs: [{ internalType: "address", name: "asset", type: "address" }],
+    name: "getReserveData",
+    outputs: [
+      { internalType: "uint256", name: "availableLiquidity", type: "uint256" },
+      { internalType: "uint256", name: "totalStableDebt", type: "uint256" },
+      { internalType: "uint256", name: "totalVariableDebt", type: "uint256" },
+      { internalType: "uint256", name: "liquidityRate", type: "uint256" },
+      { internalType: "uint256", name: "variableBorrowRate", type: "uint256" },
+      { internalType: "uint256", name: "stableBorrowRate", type: "uint256" },
+      {
+        internalType: "uint256",
+        name: "averageStableBorrowRate",
+        type: "uint256",
+      },
+      { internalType: "uint256", name: "liquidityIndex", type: "uint256" },
+      { internalType: "uint256", name: "variableBorrowIndex", type: "uint256" },
+      { internalType: "uint40", name: "lastUpdateTimestamp", type: "uint40" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
 ];
 
 const LPAP_ABI = [
@@ -121,7 +143,7 @@ const PRICEORACLE_ABI = [
   },
 ];
 
-var USD = 1;
+var USD;
 const aggregatorV3InterfaceABI = [
   {
     inputs: [],
@@ -143,7 +165,7 @@ await priceFeed.methods
   .latestRoundData()
   .call()
   .then((roundData) => {
-    USD = (roundData.answer)/1e8;
+    USD = roundData.answer / 1e8;
   });
 const CONTRACT_ADDR = "0x9198F13B08E299d85E096929fA9781A1E3d5d827";
 const PD_CONTR_ADDR = "0xFA3bD19110d986c5e5E9DD5F69362d05035D045B";
@@ -158,8 +180,8 @@ const user = "0x15C6b352c1F767Fa2d79625a40Ca4087Fab9a198";
 await getUserDetails();
 
 async function getUserDetails() {
-  let map = new Map();
-  let decimal = new Map();
+  let map = new Map();        //stores symbol of asset
+  let decimal = new Map();    //decimal of each asset
 
   // getting total supply, total borrow and other details of assets owned by user
   await contract.methods
@@ -183,9 +205,9 @@ async function getUserDetails() {
       );
       console.log(`healthFactor: ${BigNumber(details.healthFactor).div(1e18)}`);
       console.log(
-        `LiquidationThreshold: ${details.currentLiquidationThreshold}`
+        `LiquidationThreshold: ${details.currentLiquidationThreshold / 100}%`
       );
-      console.log(`LoanToValue: ${details.ltv / 100}%`);
+      console.log(`LoanToValue: ${details.ltv / 100}%\n`);
     });
 
   await pdContract.methods
@@ -195,12 +217,8 @@ async function getUserDetails() {
       for (let i = 0; i < objects.length; i++) {
         map.set(objects[i].tokenAddress.toLowerCase(), objects[i].symbol);
       }
-      // console.log(map);
     });
 
-  console.log();
-  console.log(`Asset Wise SUPPLIES And BORROWS:`);
-  console.log();
   let arr = [];
 
   //get list of active reserves
@@ -210,18 +228,23 @@ async function getUserDetails() {
     .then((list) => {
       arr.push(list);
     });
-
+  var ltLT = new Map();
   for (let i = 0; i < arr[0].length; i++)
     await pdContract.methods
       .getReserveConfigurationData(arr[0][i].toLowerCase())
       .call()
       .then((data) => {
         decimal.set(arr[0][i].toLowerCase(), data.decimals);
+        ltLT.set(arr[0][i].toLowerCase(), {
+          ltv: data.ltv / 10000,
+          liquidationThreshold: data.liquidationThreshold / 10000,
+        });
       });
 
   //get details of reserves borrowed or deposited by user
   //getting the supply and deposit of individual assets for a user
   let results = [];
+  var stable = new Map();
   for (let i = 0; i < arr[0].length; i++) {
     let addr = arr[0][i].toLowerCase();
     await pdContract.methods
@@ -241,14 +264,8 @@ async function getUserDetails() {
             .div(10 ** decimal.get(addr))
             .toPrecision(18),
         });
+        stable.set(addr, BigNumber(data.stableBorrowRate).toFixed());
       });
-  }
-
-  for (let i = 0; i < results.length; i++) {
-    let asset = map.get(results[i].address);
-    console.log(
-      `Asset:[${asset}] --> totalSupply: ${results[i].totalSupply} --> totalBorrows: ${results[i].totalBorrows}`
-    );
   }
 
   //getting price of tokens
@@ -260,19 +277,59 @@ async function getUserDetails() {
     .then((addr) => {
       priceOracleAddr = addr;
     });
+  // console.log(`\nPrices of tokens \n`);
 
-  console.log(`\nPrices of tokens \n`);
+  var res = new Map();
+  for (let i = 0; i < arr[0].length; i++) {
+    await pdContract.methods
+      .getReserveData(arr[0][i].toLowerCase())
+      .call()
+      .then((obj) => {
+        var borrow;
+        if (stable.get(arr[0][i].toLowerCase()) != 0) {
+          borrow = stable.get(arr[0][i].toLowerCase());
+        } else {
+          borrow = BigNumber(obj.variableBorrowRate)
+            .div(1e27)
+            .toFixed();
+        }
+        res.set(arr[0][i].toLowerCase(), {
+          symbol: map.get(arr[0][i].toLowerCase()),
+          supplyRate: BigNumber(obj.liquidityRate)
+            .div(1e27)
+            .toNumber(),
+          borrowRate: borrow,
+        });
+      });
+    Object.assign(
+      res.get(arr[0][i].toLowerCase()),
+      ltLT.get(arr[0][i].toLowerCase())
+    );
+  }
   const poContract = new web3.eth.Contract(PRICEORACLE_ABI, priceOracleAddr);
   for (let i = 0; i < arr[0].length; i++) {
     await poContract.methods
       .getAssetPrice(arr[0][i].toLowerCase())
       .call()
       .then((price) => {
-        console.log(
-          `Price of ${map.get(arr[0][i].toLowerCase())} => ${BigNumber(price)
-            .div(1e18)
-            .times(USD)} USD`
-        );
+        Object.assign(res.get(arr[0][i].toLowerCase()), {
+          priceInUSD: BigNumber(price).div(1e18).times(USD).toFixed(),
+          priceInETH: BigNumber(price).div(1e18).toFixed(),
+        });
       });
   }
+  for (let i = 0; i < results.length; i++) {
+    Object.assign(res.get(results[i].address), {
+      supply: results[i].totalSupply,
+      borrow: results[i].totalBorrows,
+      maxBorrowLimit: BigNumber(results[i].totalSupply).times(
+        res.get(results[i].address).ltv
+      ).toFixed(),
+      maxLiquidationBorrowLimit: BigNumber(results[i].totalSupply).times(
+        res.get(results[i].address).liquidationThreshold
+      ).toFixed(),
+    });
+  }
+  
+  console.log(Array.from(res.values()));
 }
