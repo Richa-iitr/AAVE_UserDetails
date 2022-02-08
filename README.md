@@ -8,4 +8,4 @@ The details of user's positions:
 
 AAVE Portal Position Status:
 
-![alt text](https://github.com/Richa-iitr/AAVE_UserDetails/blob/master/AAVEPos.png?raw=true)
+     ![alt text](https://github.com/Richa-iitr/AAVE_UserDetails/blob/master/AAVEPos.png?raw=true)
